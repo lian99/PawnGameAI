@@ -1,124 +1,77 @@
-# import the socket module
 import pygame
+import socket
+import select
 from board import ChessBoard
 from UserInterface import UserInterface
-import chess
-import socket
 
-global time
-global color
-global surface
-global UI
+def main():
+    pygame.init()
+    screen = pygame.display.set_mode((600, 600))
+    pygame.display.set_caption('Pawn Game')
+    clock = pygame.time.Clock()
 
-# Create a socket instance
+    # Initialize game state
+    board = ChessBoard()
+    ui = UserInterface(screen, board)
+    color = None  # Track player color
+    running = True
 
-socketObject = socket.socket()
+    # Setup the socket
+    socketObject = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    socketObject.connect(("localhost", 9999))
+    socketObject.setblocking(0)  # Set the socket to non-blocking mode
 
-# Using the socket connect to a server...in this case localhost
+    while running:
+        # Handle Pygame events
+        for event in pygame.event.get():
+            if event.type == pygame.QUIT:
+                running = False
 
-socketObject.connect(("localhost",9999))
+        # Non-blocking network message check
+        ready_to_read, _, _ = select.select([socketObject], [], [], 0)
+        if ready_to_read:
+            data = socketObject.recv(1024).decode()
+            if data:
+                print("Received data:", data)
+                # Process the received data
+                if data.startswith("Time"):
+                    time = int(data[4:]) * 60
+                    ui.updateTimer(time)
+                    msg = "OK"
+                    socketObject.send(msg.encode())
 
-# Send a message to the web server to supply a page as given by Host param of GET request
+                elif data.startswith("Setup"):
+                    ui.setupBoard(data)
+                    ui.drawComponent()
 
-while (True):
+                elif data == "White" or data == "Black":
+                    color = data
+                    ui.playerColor = color
+                    ui.drawComponent()
 
-    data = socketObject.recv(1024)
-    data = data.decode()
+                elif data == "Your turn":
+                    move, flag = ui.clientMove()  # This should be adapted if it blocks
+                    msg = move if flag == 0 else ("Win" if flag == -1 else "Lost")
+                    socketObject.send(msg.encode())
 
-    print(data)
+                elif data == "Begin":
+                    ui.firstgame = True
+                    ui.drawComponent()
 
-    if data.startswith("Time"):
-        time = int(data[4:]) * 60
-        msg = "OK"
-        msg = msg.encode()
-        socketObject.send(msg)
+                elif data == "exit":
+                    print("Server requested close.")
+                    running = False
 
-    elif data.startswith("Setup"):
-
-        pawn_num = 4
-        UI.firstgame = False
-        for i in range(64):
-            UI.chessboard.boardArray[i // 8][i % 8] = " "
-        for i in range(6, len(data) - 8, 4):
-            if color == 'W':
-                if data[i] == color:
-                    UI.chessboard.boardArray[8 - int(data[i+2])][ord(data[i + 1]) - 65] = "P"
-                    pawn_num = pawn_num + 1
                 else:
-                    UI.chessboard.boardArray[8 - int(data[i + 2])][ord(data[i + 1]) - 65] = "p"
-            else:
-                if data[i] == color:
-                    UI.chessboard.boardArray[int(data[i+2]) - 1][ord(data[i + 1]) - 65] = "P"
-                    pawn_num = pawn_num + 1
-                else:
-                    UI.chessboard.boardArray[int(data[i + 2]) - 1][ord(data[i + 1]) - 65] = "p"
-        UI.chessboard.round = int(time/pawn_num)
-        UI.drawComponent()
+                    ui.drawComponent()
 
+        # Refresh the game screen
+        ui.drawComponent()
+        pygame.display.flip()
+        clock.tick(60)
 
-    elif data == "White":
-        color = "W"
-        UI.playerColor = color
+    pygame.quit()
+    socketObject.close()
 
-    elif data == "Black":
-        color = "B"
-        UI.playerColor = color
-
-    elif data == "exit":
-        print("Connection closed")
-        break
-
-    elif data == "Your turn":
-        data, flag = UI.clientMove()# flag = -1 lose, flag = 1 win
-        if flag == -1:
-            msg = "Win"
-        elif flag == 1:
-            msg = "Lost"
-        else:
-            move = ""
-            move += str(chr(97 + int(data[1])))
-            move += str(8 - int(data[0]))
-            move += str(chr(97 + int(data[3])))
-            move += str(8 - int(data[2]))
-            msg = move
-        msg = msg.encode()
-        socketObject.send(msg)
-
-    elif data == "Begin":
-        pygame.init()  # initialize pygame
-        surface = pygame.display.set_mode([600, 600], 0, 0)
-        pygame.display.set_caption('Pawn Game')
-        Board = ChessBoard()
-        UI = UserInterface(surface, Board)
-        UI.time = time
-        UI.chessboard.round = int(time/14)
-
-    elif data == "Classic":
-        UI.drawComponent()
-
-    elif data == "White's turn" or data == "Black's turn":
-        pass
-
-    elif data == "Connected to the server":
-        msg = "OK"
-        msg = msg.encode()
-        socketObject.send(msg)
-
-
-    #enemy move
-    else:
-        move = ""
-        move += str(8 - int(data[1]))
-        move += str(ord(data[0]) - 97)
-        move += str(8 - int(data[3]))
-        move += str(ord(data[2]) - 97)
-        if int(move[1]) - int(move[3]) == 2 or int(move[1]) - int(move[3]) == -2:
-            UI.chessboard.enpassant = True
-            UI.chessboard.enpassantCol = int(move[0])
-        UI.chessboard.changePerspective()
-        UI.chessboard.computeMove(move, 0)
-        UI.chessboard.changePerspective()
-        UI.drawComponent()
-
-
-socketObject.close()
+if __name__ == "__main__":
+    main()
